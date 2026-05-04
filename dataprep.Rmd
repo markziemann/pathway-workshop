@@ -22,7 +22,7 @@ Source: https://github.com/markziemann/pathway-workshop
 
 suppressPackageStartupMessages({
   library("getDEE2")
-  library("euler")
+  library("eulerr")
   library("DESeq2")
   library("kableExtra")
   library("RhpcBLASctl")
