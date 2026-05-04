@@ -29,7 +29,7 @@ Then execute the Rmarkdown scripts
 ```
 Rscript -e 'rmarkdown::render("dataprep.Rmd")'
 Rscript -e 'rmarkdown::render("session2.Rmd")'
-``
+```
 
 ## Inspect results
 
