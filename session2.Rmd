@@ -1,0 +1,185 @@
+---
+title: "Pathway analysis powered with R/bioconductor"
+author: "Mark Ziemann & Anusuiya Bora"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 5
+    fig_height: 5
+theme: cosmo
+---
+
+Source: https://github.com/markziemann/pathway-workshop
+
+## Introduction
+
+```{r,libs}
+
+#knitr::opts_chunk$set(dev = 'svg') # set output device to svg
+
+suppressPackageStartupMessages({
+  library("getDEE2")
+  library("DESeq2")
+  library("kableExtra")
+  library("eulerr")
+  library("gplots")
+  library("mitch")
+  library("fgsea")
+  library("RhpcBLASctl")
+  library("parallel")
+  library("beeswarm")
+  library("vioplot")
+})
+
+RhpcBLASctl::blas_set_num_threads(1)
+
+```
+
+Here we demonstrate how to do over-representation analysis (ORA) and functional class scoring (FCS).
+
+## Load DE data
+
+For information on the dataset we are using, see the script called "dataprep.Rmd".
+
+```{r,load}
+
+de <- readRDS("data/de.Rds")
+
+head(de) %>%
+  kbl(caption="To DEGs for Aza treatment in AML3 cells") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+Gene sets were obtained from Reactome.
+
+```{r,reactome}
+
+gs <- gmtPathways("ref/ReactomePathways_2025-09-02.gmt")
+
+head(gs,3)
+
+summary(unlist(lapply(gs,length)))
+
+```
+
+## ORA: Filter genes
+
+Here we select up and down-regulated genes as well as the background.
+The background was previously selected based on the presence of an
+average of 10 reads per sample.
+
+```{r,filter}
+
+up <- rownames(subset(de, padj < 0.01 & log2FoldChange > 0))
+up <- unique(sapply(strsplit(up," "),"[[",2))
+length(up)
+
+dn <- rownames(subset(de, padj < 0.01 & log2FoldChange < 0))
+dn <- unique(sapply(strsplit(dn," "),"[[",2))
+length(dn)
+
+# background selection was done earlier
+#mxf <- mx[which(rowMeans(mx)>=10),]
+dim(de)
+bg <- rownames(de)
+bg <- unique(sapply(strsplit(bg," "),"[[",2))
+length(bg)
+
+```
+
+Now we write the gene lists to text files that we can use for ORA with web tools like iDEP.
+
+```{r,write_gene_lists}
+
+writeLines(up,"data/up.txt")
+writeLines(dn,"data/down.txt")
+writeLines(bg,"data/background.txt")
+
+```
+
+## ORA: run the test with reactome gene sets
+
+Separate tests for up and down.
+
+First, up.
+
+```{r,ora_up1}
+
+ora_up <- fora(pathways=gs, genes=up, universe=bg, minSize = 5, maxSize = Inf)
+nrow(ora_up)
+message("number of up-regulated gene sets with FDR<0.01")
+nrow(subset(ora_up,padj<0.01))
+
+head(ora_up,10) %>%
+  kbl(caption="Top upregulated pathways with ORA (significance)") %>%
+  kable_paper("hover", full_width = F)
+
+ora_up <- ora_up[order(-ora_up$foldEnrichment),]
+
+head(ora_up,10) %>%
+  kbl(caption="Top upregulated pathways with ORA (fold enrichment)") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+Next, down.
+
+```{r,ora_dn1}
+
+ora_dn <- fora(pathways=gs, genes=dn, universe=bg, minSize = 5, maxSize = Inf)
+nrow(ora_dn)
+message("number of down-regulated gene sets with FDR<0.01")
+nrow(subset(ora_dn,padj<0.01))
+
+head(ora_dn,10) %>%
+  kbl(caption="Top downregulated pathways with ORA (significance)") %>%
+  kable_paper("hover", full_width = F)
+
+ora_dn <- ora_dn[order(-ora_dn$foldEnrichment),]
+
+head(ora_dn,10) %>%
+  kbl(caption="Top dnregulated pathways with ORA (fold enrichment)") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+Barplot
+
+```{r,ora_barplot}
+
+npw=15
+ora_up_vals <- head(ora_up$foldEnrichment,15)
+names(ora_up_vals) <- head(ora_up$pathway,15)
+
+ora_dn_vals <- head(ora_dn$foldEnrichment,15)
+names(ora_dn_vals) <- head(ora_dn$pathway,15)
+
+myvals <- c(ora_dn_vals,rev(ora_up_vals))
+
+names(myvals) <- ifelse(nchar(names(myvals)) > 53, paste0(strtrim(names(myvals), 50), '...'), names(myvals))
+
+par(mar=c(5.1,25.1,4.1,2.1))
+
+mycols <- c( rep("blue",length(ora_dn_vals)) , rep("red",length(ora_up_vals)) )
+
+barplot(myvals, col=mycols,
+  horiz=TRUE,las=2,xlab="Fold enrichment",main="Effect of Aza treatment")
+mtext("Red=up, Blue=down")
+
+par(mar=c(5.1,4.1,4.1,2.1))
+
+
+```
+
+
+## Session information
+
+```{r,session}
+
+sessionInfo()
+
+```
