@@ -30,8 +30,11 @@ Rscript -e 'rmarkdown::render("session2.Rmd")'
 They should complete successfully, at which time you can exit from the container
 using `exit`.
 
-Then `docker ps` can be used to get the ID of the container with the results.
+Then `docker ps -a` can be used to get the ID of the container with the results.
 
 Then `docker cp` can be used to copy the results to the host machine.
+Your command might look a bit like this:
 
-
+```
+docker cp dbc303a575ed:/pathway-workshop/ docker_results
+```
