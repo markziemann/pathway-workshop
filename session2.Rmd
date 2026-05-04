@@ -25,13 +25,9 @@ suppressPackageStartupMessages({
   library("DESeq2")
   library("kableExtra")
   library("eulerr")
-  library("gplots")
-  library("mitch")
   library("fgsea")
   library("RhpcBLASctl")
   library("parallel")
-  library("beeswarm")
-  library("vioplot")
 })
 
 RhpcBLASctl::blas_set_num_threads(1)
