@@ -1,0 +1,253 @@
+---
+title: "Pathway workshop - Data preparation"
+author: "Mark Ziemann & Anusuiya Bora"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 5
+    fig_height: 5
+theme: cosmo
+---
+
+Source: https://github.com/markziemann/pathway-workshop
+
+## Introduction
+
+```{r,libs}
+
+#knitr::opts_chunk$set(dev = 'svg') # set output device to svg
+
+suppressPackageStartupMessages({
+  library("getDEE2")
+  library("DESeq2")
+  library("kableExtra")
+  library("eulerr")
+  library("gplots")
+  library("mitch")
+  library("fgsea")
+  library("RhpcBLASctl")
+  library("parallel")
+  library("beeswarm")
+  library("vioplot")
+})
+
+RhpcBLASctl::blas_set_num_threads(1)
+
+```
+
+For this guide I will be using bulk RNA-seq data from a previous study, which is
+deposited at NCBI GEO and SRA under accession numbers: GSE55123 and SRP038101 (Lund et al, 2014).
+The experiment is designed to investigate the effect of Azacitidine treatment on AML3 cells.
+
+The raw data have been processed by the DEE2 project, and the summary gene expression counts are
+available at the dee2.io website, and programmatically with the getDEE2 bioconductor package
+(Ziemann et al, 2019).
+
+The gene counts have also been deposited to the `/data` folder in the `example.Rdata` file in case
+the DEE2 resource becomes unavailable.
+To import it, use the command: `load("data/example.Rdata")`
+
+Alternatively, you could fetch data from another resource like NCBI GEO, Zenodo or from the host
+storage drive.
+
+```{r,fetch}
+
+mdat <- getDEE2Metadata("hsapiens")
+
+# get sample sheet
+ss <- subset(mdat,SRP_accession=="SRP038101")
+
+# fetch the whole set of RNA-seq data
+x <- getDEE2("hsapiens",ss$SRR_accession , metadata=mdat, legacy=TRUE)
+mx <- x$GeneCounts
+rownames(mx) <- paste(rownames(mx),x$GeneInfo$GeneSymbol)
+dim(mx)
+
+# aza no filtering
+ss$trt <- grepl("Treated",ss$Experiment_title)
+
+ss %>%
+  kbl(caption="sample sheet for Aza treatment in AML3 cells") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+## Data quality control
+
+QC is important, even if you are using public transcriptome data.
+For RNA-seq it is a good idea to show the number of reads for each sample.
+
+```{r,counts1}
+
+colSums(mx)
+
+par(mar=c(5,7,5,1))
+barplot(rev(colSums(mx)),horiz=TRUE,las=1,main="number of reads per sample in SRP038101")
+
+```
+
+Now make a MDS plot.
+
+```{r,mds1}
+
+mds <- cmdscale(dist(t(mx)))
+
+# expand plot area
+XMIN=min(mds[,1])*1.3
+XMAX=max(mds[,1])*1.3
+YMIN=min(mds[,2])*1.3
+YMAX=max(mds[,2])*1.3
+
+cols <- as.character(grepl("Treated",ss$Experiment_title))
+cols <- gsub("FALSE","lightblue",cols)
+cols <- gsub("TRUE","pink",cols)
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  xlim=c(XMIN,XMAX),ylim=c(YMIN,YMAX),
+  pch=19,cex=2,col=cols, main="MDS plot")
+text(cmdscale(dist(t(mx))), labels=colnames(mx) )
+
+```
+
+## Differential expression analysis
+
+We will be using DESeq2 for DE analysis.
+
+The count matrix is prefiltered using a detection threshold of 10 reads per sample across all samples.
+All genes that meet the detection threshold will comprise the background list.
+
+We will also repeat this without a detection threshold.
+
+The first 6 rows of the count matrix are shown.
+
+```{r,de1}
+
+mxf <- mx[which(rowMeans(mx)>=10),]
+dim(mxf)
+
+head(mxf,6) %>%
+  kbl(caption="Count matrix format") %>%
+  kable_paper("hover", full_width = F)
+
+dds <- DESeqDataSetFromMatrix(countData = mxf , colData = ss, design = ~ trt )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <-cbind(as.data.frame(z),mxf)
+def <-as.data.frame(zz[order(zz$pvalue),])
+
+head(def,10) %>%
+  kbl(caption="Top DE genes for Aza treatment") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+Make a smear plot.
+
+```{r,smearplot}
+
+sigf <- subset(def,padj<=0.01)
+
+DET=nrow(mxf)
+NSIG=nrow(sigf)
+NUP=nrow(subset(sigf,log2FoldChange>0))
+NDN=nrow(subset(sigf,log2FoldChange<0))
+
+HEADER=paste(DET,"detected genes;",NSIG,"w/FDR<0.01;",NUP,"up;",NDN,"down")
+
+plot(log10(def$baseMean) ,def$log2FoldChange,
+  cex=0.6,pch=19,col="darkgray",
+  main="5-azacitidine treatment in AML3 cells",
+  xlab="log10(basemean)",ylab="log2(fold change)")
+
+points(log10(sigf$baseMean) ,sigf$log2FoldChange,
+  cex=0.6,pch=19,col="red")
+
+mtext(HEADER)
+
+```
+
+In the next sections I will run enrichment analysis with over-representation test
+and compare it to functional class scoring.
+
+## Get update gene symbols
+
+Let's see if many of the gene symbols have changed.
+
+Comparing Ensembl release 90 to GENCODE Release 49 (GRCh38.p14) which corresponds to Ensembl 115 (Sept 2025).
+
+So v90 had 58k genes and v115 has 86k which is a big increase.
+The v90 has 1609 genes that have been removed an v115 has 29676 that have been added.
+There are 56693 common.
+
+From these common ones, 20456 have different gene names.
+I think the approach to naming these putative genes has changed a lot.
+Lots of CXorfXX genes have changed, not just AL358472.5 type names.
+
+In the next chunk, I'll show a few lines of the older source gene names.
+
+There is also an Euler diagram of the gene symbol repertoires.
+
+```{r,genesymbolupdate,fig.height=3,fig.width=5}
+
+gt <- read.table("https://dee2.io/data/hsapiens/hsa_gene_info.tsv",header=TRUE)
+head(gt)
+
+gtnew <- read.table("ref/gencode.v49.genenames.tsv")
+
+v1 <- list("Ens90"=gt$GeneID, "Ens115"=gtnew$V1)
+plot(euler(v1),quantities = list(cex = 2), labels = list(cex = 2))
+
+```
+
+```{r,genesymbolupdate2,fig.height=3,fig.width=5}
+
+message("Number of unique genes in the original gene table:")
+length(gt$GeneID)
+
+message("Number of unique genes in the new gene annotation set:")
+length(gtnew$V1)
+
+message("Number of shared gene IDs between new and old annotations:")
+length(intersect(gt$GeneID,gtnew$V1))
+
+message("Number of gene IDs specific to the old annotation:")
+length(setdiff(gt$GeneID,gtnew$V1))
+
+message("Number of gene IDs specific to the new annotation:")
+length(setdiff(gtnew$V1,gt$GeneID))
+
+message("Here is the mapping table for old-new gene symbols:")
+gtm <- merge(gt,gtnew,by.x="GeneID",by.y="V1")
+
+message("Number of rows:")
+nrow(gtm)
+
+message("How many of these gene symbols are the same?")
+table(gtm$GeneSymbol == gtm$V2)
+
+```
+
+## Save data
+
+```{r,save}
+
+dir.create("data")
+
+detsv <- cbind(rownames(def),def)
+colnames(detsv)[1] <- "GeneID"
+write.table(detsv,"data/de.tsv",sep="\t",row.names=FALSE)
+save.image("data/de.Rdata")
+saveRDS(def,"data/de.Rds")
+
+```
+
+## Session information
+
+```{r,session}
+
+sessionInfo()
+
+```
