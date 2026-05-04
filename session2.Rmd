@@ -7,8 +7,8 @@ output:
     toc: true
     toc_float: true
     code_folding: hide
-    fig_width: 5
-    fig_height: 5
+    fig_width: 7
+    fig_height: 7
 theme: cosmo
 ---
 
@@ -103,7 +103,10 @@ writeLines(bg,"data/background.txt")
 
 ## ORA: run the test with reactome gene sets
 
-Separate tests for up and down.
+The goal is to understand whether certain gene pathways are enriched at a higher level in the
+DE list as compared to the background list of detected genes.
+
+We are running separate tests for up and down DEGs.
 
 First, up.
 
@@ -172,14 +175,135 @@ mtext("Red=up, Blue=down")
 
 par(mar=c(5.1,4.1,4.1,2.1))
 
+```
+
+## Functional class scoring
+
+We will rank the genes based on the "stat" value from DESeq2, which is the Wald test statistic.
+
+First step is to remove redundant gene symbols (there are 4).
+
+```{r,fcs1,message = FALSE}
+
+de2 <- de
+
+de2$gene <- sapply(strsplit(rownames(de)," "),"[[",2)
+
+which(duplicated(de2$gene))
+
+de2ag <- aggregate(de2, stat ~ gene, FUN=sum)
+
+destat <- de2ag$stat
+names(destat) <- de2ag$gene
+
+head(destat)
+
+fcs_res <- fgsea(pathways = gs,
+                  stats    = destat,
+                  minSize  = 5,
+                  maxSize  = 50000,
+                  nPermSimple = 10000,
+                  nproc = 1)
+
+fcs_res <- fcs_res[order(fcs_res$padj),]
 
 ```
 
+Now let's take a look at the top results based on statistical significance.
+
+```{r,fcs2}
+
+head( subset(fcs_res,ES>0) , 10) %>%
+  kbl(caption="Top upregulated pathways with FCS (significance)") %>%
+  kable_paper("hover", full_width = F)
+
+head( subset(fcs_res,ES<0) , 10) %>%
+  kbl(caption="Top downregulated pathways with FCS (significance)") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+Now let's take a look at the results based on ES after removal of nonsignificant sets.
+
+```{r,fcs3}
+
+sig <- subset(fcs_res,padj<0.01)
+
+fcs_up <- tail(sig[order(sig$ES),],15)
+
+fcs_up %>%
+  kbl(caption="Top upregulated pathways with FCS (ES prioritisation)") %>%
+  kable_paper("hover", full_width = F)
+
+fcs_dn <- head(sig[order(sig$ES),],15)
+
+fcs_dn %>%
+  kbl(caption="Top downregulated pathways with FCS (ES prioritisation)") %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+Now make a barplot.
+
+```{r,fcs_barplot}
+
+fcs_vals <- c(fcs_dn$ES, fcs_up$ES)
+names(fcs_vals) <- c(fcs_dn$pathway, fcs_up$pathway)
+
+names(fcs_vals) <- ifelse(nchar(names(fcs_vals)) > 53, paste0(strtrim(names(fcs_vals), 50), '...'), names(fcs_vals))
+
+par(mar=c(5.1,24.1,4.1,2.1))
+
+barplot(fcs_vals, horiz=TRUE,las=2,xlab="ES",main="Effect of Aza treatment")
+
+par(mar=c(5.1,4.1,4.1,2.1))
+
+```
+
+## Compare ORA and FCS approaches
+
+```{r,euler}
+
+ora_sig_up <- subset(ora_up,padj<0.01)$pathway
+ora_sig_dn <- subset(ora_dn,padj<0.01)$pathway
+
+fcs_sig_up <- subset(fcs_res,ES>0 & padj<0.01)$pathway
+fcs_sig_dn <- subset(fcs_res,ES<0 & padj<0.01)$pathway
+
+v1 <- list("ORA up"=ora_sig_up, "ORA down"=ora_sig_dn,
+  "FCS up"=fcs_sig_up, "FCS down"=fcs_sig_dn)
+
+plot(euler(v1),quantities = list(cex = 2), labels = list(cex = 2))
+
+```
+
+Set analysis.
+
+```{r,set_analysis1}
+
+message("Common upregulated")
+intersect(ora_sig_up, fcs_sig_up)
+
+message("Common downregulated")
+intersect(ora_sig_dn, fcs_sig_dn)
+
+```
+
+Enrichment plot.
+
+```{r,eplot}
+
+mypw <- gs[which(names(gs) %in% fcs_dn$pathway)]
+
+plotGseaTable(mypw, destat, fcs_res, gseaParam = 0.5)
+
+```
 
 ## Session information
 
 ```{r,session}
 
 sessionInfo()
+save.image("data/session2.Rdata")
 
 ```
