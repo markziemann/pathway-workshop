@@ -245,7 +245,6 @@ dim(mxfa)
 ```{r,save}
 
 dir.create("data")
-blah()
 write.csv(mxfa,"data/counts.csv",row.names=FALSE)
 detsv <- cbind(rownames(def),def)
 colnames(detsv)[1] <- "GeneID"
