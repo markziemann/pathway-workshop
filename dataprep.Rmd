@@ -225,12 +225,27 @@ table(gtm$GeneSymbol == gtm$V2)
 
 ```
 
+## Curate count data for iDEP
+
+Need to aggregate for duplicated gene names.
+Counts for genes with the same name are summed.
+
+```{r,curate_for_idep}
+
+mxf$gene <- sapply(strsplit(rownames(mxf)," "),"[[",2)
+
+mxfa <- aggregate(data=mxf, . ~ gene, FUN=sum)
+dim(mxfa)
+
+```
+
+
 ## Save data
 
 ```{r,save}
 
 dir.create("data")
-
+write.table(mxfa,"data/counts.tsv",sep="\t",row.names=FALSE)
 detsv <- cbind(rownames(def),def)
 colnames(detsv)[1] <- "GeneID"
 write.table(detsv,"data/de.tsv",sep="\t",row.names=FALSE)
